@@ -9,11 +9,14 @@ Code adapted from
 import itertools
 from datetime import timedelta
 from functools import lru_cache
+from tabnanny import check
 from typing import Optional
 
+from numpy import roll
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils import checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_3tuple
 
@@ -910,17 +913,22 @@ class Swin3DTransformerBackbone(nn.Module):
 
         skips = []
         for i, layer in enumerate(self.encoder_layers):
-            x, x_unscaled = layer(x, c, all_enc_res[i], rollout_step=rollout_step)
+            # x, x_unscaled = layer(x, c, all_enc_res[i], rollout_step=rollout_step)
+            x, x_unscaled = checkpoint.checkpoint(layer.forward, x, c, all_enc_res[i], (0,0,0), rollout_step, use_reentrant=False)
             skips.append(x_unscaled)
         for i, layer in enumerate(self.decoder_layers):
             index = self.num_decoder_layers - i - 1
-            x, _ = layer(
-                x,
-                c,
-                all_enc_res[index],
-                padded_outs[index - 1],
-                rollout_step=rollout_step,
-            )
+            # x, _ = layer(
+            #     x,
+            #     c,
+            #     all_enc_res[index],
+            #     padded_outs[index - 1],
+            #     rollout_step=rollout_step,
+            # )
+
+            # def fn(x, c, res, p, rollout_step):
+            #     return layer(x, c, res, p, rollout_step=rollout_step)
+            x, x_unscaled = checkpoint.checkpoint(layer.forward, x, c, all_enc_res[index], padded_outs[index-1], rollout_step, use_reentrant=False)
 
             if 0 < i < self.num_decoder_layers - 1:
                 # For the intermediate stages, we use additive skip connections.
