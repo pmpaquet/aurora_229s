@@ -2,12 +2,14 @@
 
 import contextlib
 import dataclasses
+from tabnanny import check
 import warnings
 from datetime import timedelta
 from functools import partial
 from typing import Optional
 
 import torch
+from torch.utils import checkpoint
 from huggingface_hub import hf_hub_download
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
@@ -200,40 +202,62 @@ class Aurora(torch.nn.Module):
             static_vars={k: v[None, None].repeat(B, T, 1, 1) for k, v in batch.static_vars.items()},
         )
 
-        x = self.encoder(
-            batch,
-            lead_time=timedelta(hours=6),
-        )
+        # x = self.encoder(
+        #     batch,
+        #     lead_time=timedelta(hours=6),
+        # )
+
+        x = checkpoint.checkpoint(self.encoder.forward, batch, timedelta(hours=6), use_reentrant=False)
         with torch.autocast(device_type="cuda") if self.autocast else contextlib.nullcontext():
-            x = self.backbone(
-                x,
-                lead_time=timedelta(hours=6),
-                patch_res=patch_res,
-                rollout_step=batch.metadata.rollout_step,
-            )
-        pred = self.decoder(
-            x,
-            batch,
-            lead_time=timedelta(hours=6),
-            patch_res=patch_res,
-        )
+            # x = self.backbone(
+            #     x,
+            #     lead_time=timedelta(hours=6),
+            #     patch_res=patch_res,
+            #     rollout_step=batch.metadata.rollout_step,
+            # )
+            x = checkpoint.checkpoint(self.backbone.forward, x, timedelta(hours=6), batch.metadata.rollout_step, patch_res, use_reentrant=False)
+        
+        # pred = self.decoder(
+        #     x,
+        #     batch,
+        #     lead_time=timedelta(hours=6),
+        #     patch_res=patch_res,
+        # )
+        x = checkpoint.checkpoint(self.decoder.forward, x, batch, patch_res, timedelta(hours=6), use_reentrant=False)
 
         # Remove batch and history dimension from static variables.
-        pred = dataclasses.replace(
-            pred,
+        x = dataclasses.replace(
+            x,
             static_vars={k: v[0, 0] for k, v in batch.static_vars.items()},
         )
 
         # Insert history dimension in prediction. The time should already be right.
-        pred = dataclasses.replace(
-            pred,
-            surf_vars={k: v[:, None] for k, v in pred.surf_vars.items()},
-            atmos_vars={k: v[:, None] for k, v in pred.atmos_vars.items()},
+        x = dataclasses.replace(
+            x,
+            surf_vars={k: v[:, None] for k, v in x.surf_vars.items()},
+            atmos_vars={k: v[:, None] for k, v in x.atmos_vars.items()},
         )
 
-        pred = pred.unnormalise(surf_stats=self.surf_stats)
+        return x.unnormalise(surf_stats=self.surf_stats)
 
-        return pred
+        # return pred
+
+        # # Remove batch and history dimension from static variables.
+        # pred = dataclasses.replace(
+        #     pred,
+        #     static_vars={k: v[0, 0] for k, v in batch.static_vars.items()},
+        # )
+
+        # # Insert history dimension in prediction. The time should already be right.
+        # pred = dataclasses.replace(
+        #     pred,
+        #     surf_vars={k: v[:, None] for k, v in pred.surf_vars.items()},
+        #     atmos_vars={k: v[:, None] for k, v in pred.atmos_vars.items()},
+        # )
+
+        # pred = pred.unnormalise(surf_stats=self.surf_stats)
+
+        # return pred
 
     def load_checkpoint(self, repo: str, name: str, strict: bool = True) -> None:
         """Load a checkpoint from HuggingFace.
