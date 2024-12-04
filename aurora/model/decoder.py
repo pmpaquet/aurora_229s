@@ -178,3 +178,104 @@ class Perceiver3DDecoder(nn.Module):
                 rollout_step=batch.metadata.rollout_step + 1,
             ),
         )
+
+
+    def forward_surf(
+        self,
+        x: torch.Tensor,
+        batch: Batch,
+        patch_res: tuple[int, int, int],
+        lead_time: timedelta,
+    ):
+        """Forward pass of MultiScaleEncoder.
+
+        Args:
+            x (torch.Tensor): Backbone output of shape `(B, L, D)`.
+            batch (:class:`aurora.batch.Batch`): Batch to make predictions for.
+            patch_res (tuple[int, int, int]): Patch resolution
+            lead_time (timedelta): Lead time.
+
+        Returns:
+            :class:`aurora.batch.Batch`: Prediction for `batch`.
+        """
+        surf_vars = tuple(batch.surf_vars.keys())
+
+        # Extract the lat, lon and convert to float32.
+        lat, lon = batch.metadata.lat, batch.metadata.lon
+        check_lat_lon_dtype(lat, lon)
+        lat, lon = lat.to(dtype=torch.float32), lon.to(dtype=torch.float32)
+        H, W = lat.shape[0], lon.shape[-1]
+
+        # Unwrap the latent level dimension.
+        x = rearrange(
+            x,
+            "B (C H W) D -> B (H W) C D",
+            C=patch_res[0],
+            H=patch_res[1],
+            W=patch_res[2],
+        )
+
+        # Decode surface vars. Run the head for every surface-level variable.
+        x_surf = torch.stack([self.surf_heads[name](x[..., :1, :]) for name in surf_vars], dim=-1)
+        x_surf = x_surf.reshape(*x_surf.shape[:3], -1)  # (B, L, 1, V_S*p*p)
+        surf_preds = unpatchify(x_surf, len(surf_vars), H, W, self.patch_size)
+        surf_preds = surf_preds.squeeze(2)  # (B, V_S, H, W)
+        return {v: surf_preds[:, i] for i, v in enumerate(surf_vars)}
+    
+
+    def forward_atmos(
+        self,
+        x: torch.Tensor,
+        batch: Batch,
+        patch_res: tuple[int, int, int],
+        lead_time: timedelta,
+    ):
+        """Forward pass of MultiScaleEncoder.
+
+        Args:
+            x (torch.Tensor): Backbone output of shape `(B, L, D)`.
+            batch (:class:`aurora.batch.Batch`): Batch to make predictions for.
+            patch_res (tuple[int, int, int]): Patch resolution
+            lead_time (timedelta): Lead time.
+
+        Returns:
+            :class:`aurora.batch.Batch`: Prediction for `batch`.
+        """
+        atmos_vars = tuple(batch.atmos_vars.keys())
+        atmos_levels = batch.metadata.atmos_levels
+
+        # Compress the latent dimension from the U-net skip concatenation.
+        B, L, D = x.shape
+
+        # Extract the lat, lon and convert to float32.
+        lat, lon = batch.metadata.lat, batch.metadata.lon
+        check_lat_lon_dtype(lat, lon)
+        lat, lon = lat.to(dtype=torch.float32), lon.to(dtype=torch.float32)
+        H, W = lat.shape[0], lon.shape[-1]
+
+        # Unwrap the latent level dimension.
+        x = rearrange(
+            x,
+            "B (C H W) D -> B (H W) C D",
+            C=patch_res[0],
+            H=patch_res[1],
+            W=patch_res[2],
+        )
+
+        # Embed the atmospheric levels.
+        atmos_levels_encode = levels_expansion(
+            torch.tensor(atmos_levels, device=x.device), self.embed_dim
+        ).to(dtype=x.dtype)
+        levels_embed = self.atmos_levels_embed(atmos_levels_encode)  # (C_A, D)
+
+        # De-aggregate the hidden levels into the physical levels.
+        levels_embed = levels_embed.expand(B, x.size(1), -1, -1)
+        x_atmos = self.deaggregate_levels(levels_embed, x[..., 1:, :])  # (B, L, C_A, D)
+
+        # Decode the atmospheric vars.
+        x_atmos = torch.stack([self.atmos_heads[name](x_atmos) for name in atmos_vars], dim=-1)
+        x_atmos = x_atmos.reshape(*x_atmos.shape[:3], -1)  # (B, L, C_A, V_A*p*p)
+        atmos_preds = unpatchify(x_atmos, len(atmos_vars), H, W, self.patch_size)
+
+        return {v: atmos_preds[:, i] for i, v in enumerate(atmos_vars)}
+    
