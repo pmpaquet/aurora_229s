@@ -13,7 +13,7 @@ def np_mae(x: np.ndarray, y: np.ndarray):
     return np.mean(np.abs(x - y))
 
 
-def same_day_eval(model, day: str, download_path: Path, device:str) -> pd.DataFrame:
+def sameday_batch_helper(model, day: str, download_path: Path, i: int) -> Batch:
     if not (download_path / day / f"{day}-atmospheric.nc").is_file():
         download_data.download_for_day(day=day, download_path=download_path)
 
@@ -21,7 +21,6 @@ def same_day_eval(model, day: str, download_path: Path, device:str) -> pd.DataFr
     surf_vars_ds = xr.open_dataset(download_path / day / f"{day}-surface-level.nc", engine="netcdf4")
     atmos_vars_ds = xr.open_dataset(download_path / day / f"{day}-atmospheric.nc", engine="netcdf4")
 
-    i = 1  # Select this time index in the downloaded data.
     def _prepare(x: np.ndarray) -> torch.Tensor:
         """Prepare a variable.
 
@@ -69,6 +68,12 @@ def same_day_eval(model, day: str, download_path: Path, device:str) -> pd.DataFr
             atmos_levels=tuple(int(level) for level in atmos_vars_ds.level.values),
         ),
     )
+    return batch
+
+
+def same_day_eval(model, day: str, download_path: Path, device:str) -> pd.DataFrame:
+    # 'i' is index of last timestep --> 1 is training, 3 is testing (for 2 rollout steps)
+    trn_batch = sameday_batch_helper(model=model, day=day, download_path=download_path, i=1)
 
     # ----------------------------------------------------------------------------
     # Inference
@@ -76,29 +81,32 @@ def same_day_eval(model, day: str, download_path: Path, device:str) -> pd.DataFr
     model = model.to(device)
 
     with torch.inference_mode():
-        preds = [pred.to("cpu") for pred in rollout(model, batch, steps=2)]
+        preds = [pred.to("cpu") for pred in rollout(model, trn_batch, steps=2)]
     model = model.to("cpu")
 
     # Evaluation
-    batch = inference_helper.preprocess_batch(model=model, batch=batch, device='cpu')
+    tst_batch = sameday_batch_helper(model=model, day=day, download_path=download_path, i=3)
+    tst_batch = inference_helper.preprocess_batch(model=model, batch=trn_batch, device='cpu')
     surf_vars_names_wts, atmos_vars_names_wts = inference_helper.get_vars_names_wts()
     results = {var:[] for var,_,_ in surf_vars_names_wts+atmos_vars_names_wts}
 
     for i in range(2):
         print(preds[i].surf_vars['2t'].shape)
-        print(batch.surf_vars['2t'].shape)
+        print(tst_batch.surf_vars['2t'].shape)
         for sh,lh,wt in surf_vars_names_wts:
             results[sh].append(
                 wt * np_mae(
                     preds[i].surf_vars[sh][0, 0].numpy(),
-                    batch.atmos_vars[sh][2 + i, 0].numpy(),
+                    # batch.atmos_vars[sh][2 + i, 0].numpy(),
+                    tst_batch.surf_vars[sh][0, i].numpy(),
                 )
             )
         for sh,lh,wt in atmos_vars_names_wts:
             results[sh].append(
                 wt * np_mae(
                     preds[i].atmos_vars[sh][0, 0].numpy(),
-                    batch.atmos_vars[sh][2 + i, 0].numpy(),
+                    tst_batch.atmos_vars[sh][0, i].numpy(),
+                    # batch.atmos_vars[sh][2 + i, 0].numpy(),
                 )
             )
 
