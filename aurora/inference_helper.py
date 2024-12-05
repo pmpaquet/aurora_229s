@@ -229,6 +229,30 @@ def backbone_encoder_layers_forward(model: Aurora, x: torch.Tensor, patch_res: t
     return x, skips, c, all_enc_res, padded_outs
 
 
+def backbone_prep(model, x, patch_res, device):
+    lead_time = timedelta(hours=6)
+    all_enc_res, padded_outs = model.backbone.get_encoder_specs(patch_res)
+
+    lead_hours = lead_time / timedelta(hours=1)
+    lead_times = lead_hours * torch.ones(x.shape[0], dtype=torch.float32, device=x.device)
+    c = model.backbone.time_mlp.to(device)(lead_time_expansion(lead_times, model.backbone.embed_dim).to(dtype=x.dtype))
+    return c, all_enc_res, padded_outs
+
+
+class BackboneEncoderLayers(torch.nn.Module):
+    def __init__(self, encoder_layers):
+        super().__init__()
+        self.encoder_layers = torch.nn.ModuleList()
+        for layer in encoder_layers:
+            self.encoder_layers.append(deepcopy(layer))
+
+    def forward(self, x, c, all_enc_res, rollout_step):
+        skips = []
+        for i, layer in enumerate(self.encoder_layers):
+            x, x_unscaled = layer(x, c, all_enc_res[i], rollout_step=rollout_step)
+            skips.append(x_unscaled)
+        return x, skips
+
 class BackboneDecoderLayers(torch.nn.Module):
     def __init__(self, decoder_layers, num_decoder_layers):
         super().__init__()
