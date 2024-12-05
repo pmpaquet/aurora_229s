@@ -174,3 +174,4 @@ def multi_day_eval(model, day: str, download_path: Path, max_n_days:int, device:
 
     results_df = pd.DataFrame(results)
     results_df['multitask'] = np.sum(results_df[[c for c in results_df.columns if not c in ['Day', 'TimeIndex']]].values, axis=1)
+    return results_df
