@@ -1,11 +1,16 @@
+import dataclasses
 from typing import Callable, List, Union, Tuple
 from pathlib import Path
+from datetime import timedelta
 
 import numpy as np
 import torch
 import xarray as xr
 
-from aurora import Batch, Metadata
+from aurora import Aurora, Batch, Metadata
+from aurora.model.decoder import Perceiver3DDecoder
+from aurora.model.encoder import Perceiver3DEncoder
+from aurora.model.fourier import lead_time_expansion
 
 class InferenceBatcher:
     def __init__(self, base_date_list: List[str], data_path: Path) -> None:
@@ -35,7 +40,6 @@ class InferenceBatcher:
             ('v', 'v_component_of_wind'),
             ('q', 'specific_humidity'),
             ('z', 'geopotential')
-
         ]
 
         self.time_idx: int
@@ -155,3 +159,99 @@ class InferenceBatcher:
             self._update_features_and_labels()
             self.time_idx += 1
             return self.features, self.labels
+
+
+def preprocess_batch(model: Aurora, batch: Batch, device:str):
+    p = next(model.parameters())
+    batch = batch.type(p.dtype)
+    batch = batch.normalise(surf_stats=model.surf_stats)
+    batch = batch.crop(patch_size=model.patch_size)
+    batch = batch.to(device)
+    return batch
+
+
+def encoder_forward(model: Aurora, batch: Batch, device:str):
+    '''forward pass of encoder'''
+
+    # Move encoder to device
+    encoder = model.encoder.to(device)
+
+    H, W = batch.spatial_shape
+    patch_res = (
+        encoder.latent_levels,
+        H // encoder.patch_size,
+        W // encoder.patch_size,
+    )
+
+    # Insert batch and history dimension for static variables.
+    B, T = next(iter(batch.surf_vars.values())).shape[:2]
+    batch = dataclasses.replace(
+        batch,
+        static_vars={k: v[None, None].repeat(B, T, 1, 1) for k, v in batch.static_vars.items()},
+    )
+
+    x = encoder(
+        batch,
+        lead_time=timedelta(hours=6),
+    )
+    
+    return x, patch_res
+
+
+def backbone_encoder_layers_forward(model: Aurora, x: torch.Tensor, patch_res: tuple[int, int, int], rollout_step: int, device:str):
+    lead_time = timedelta(hours=6)
+    all_enc_res, padded_outs = model.backbone.get_encoder_specs(patch_res)
+
+    lead_hours = lead_time / timedelta(hours=1)
+    lead_times = lead_hours * torch.ones(x.shape[0], dtype=torch.float32, device=x.device)
+    c = model.backbone.time_mlp.to(device)(lead_time_expansion(lead_times, model.backbone.embed_dim).to(dtype=x.dtype))
+
+    skips = []
+    for i, layer in enumerate(model.backbone.encoder_layers):
+        x, x_unscaled = layer.to(device)(x, c, all_enc_res[i], rollout_step=rollout_step)
+        skips.append(x_unscaled)
+
+    return x, skips, c, all_enc_res, padded_outs
+
+
+def backbone_decoder_layers_forward(decoder_layers, x, skips, c, num_decoder_layers, all_enc_res, padded_outs, rollout_step):
+    for i, layer in enumerate(decoder_layers):
+        index = num_decoder_layers - i - 1
+        x, _ = layer(
+            x,
+            c,
+            all_enc_res[index],
+            padded_outs[index - 1],
+            rollout_step=rollout_step,
+        )
+
+        if 0 < i < num_decoder_layers - 1:
+            # For the intermediate stages, we use additive skip connections.
+            x = x + skips[index - 1]
+        elif i == num_decoder_layers - 1:
+            # For the last stage, we perform concatentation like in Pangu.
+            x = torch.cat([x, skips[0]], dim=-1)
+    return x
+
+
+def decoder_forward(decoder: Perceiver3DDecoder, x :torch.Tensor, batch: Batch, patch_res: tuple[int, int, int], surf_stats):
+    x = decoder(
+        x,
+        batch,
+        lead_time=timedelta(hours=6),
+        patch_res=patch_res,
+    )
+
+    x = dataclasses.replace(
+        x,
+        static_vars={k: v[0, 0] for k, v in batch.static_vars.items()},
+    )
+
+    # Insert history dimension in prediction. The time should already be right.
+    x = dataclasses.replace(
+        x,
+        surf_vars={k: v[:, None] for k, v in x.surf_vars.items()},
+        atmos_vars={k: v[:, None] for k, v in x.atmos_vars.items()},
+    )
+
+    return x.unnormalise(surf_stats=surf_stats)
