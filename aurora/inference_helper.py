@@ -150,7 +150,7 @@ class InferenceBatcher:
             * Copy the data, because the data must be contiguous when converting to PyTorch.
             * Convert to PyTorch.
             """
-            return torch.from_numpy(x[[self.time_idx]][None][..., ::-1, :].copy()).to(torch.float16)
+            return torch.from_numpy(x[[self.time_idx]][None][..., ::-1, :].copy())#.to(torch.float16)
 
         return Batch(
             surf_vars={sh:_prepare(self.surf_vars_ds[lh].values) for sh,lh in self.surf_vars_names},
