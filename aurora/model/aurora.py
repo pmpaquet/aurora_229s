@@ -202,28 +202,28 @@ class Aurora(torch.nn.Module):
             static_vars={k: v[None, None].repeat(B, T, 1, 1) for k, v in batch.static_vars.items()},
         )
 
-        # x = self.encoder(
-        #     batch,
-        #     lead_time=timedelta(hours=6),
-        # )
+        x = self.encoder(
+            batch,
+            lead_time=timedelta(hours=6),
+        )
 
-        x = checkpoint.checkpoint(self.encoder.forward, batch, timedelta(hours=6), use_reentrant=False)
+        # x = checkpoint.checkpoint(self.encoder.forward, batch, timedelta(hours=6), use_reentrant=False)
         with torch.autocast(device_type="cuda") if self.autocast else contextlib.nullcontext():
-            # x = self.backbone(
-            #     x,
-            #     lead_time=timedelta(hours=6),
-            #     patch_res=patch_res,
-            #     rollout_step=batch.metadata.rollout_step,
-            # )
-            x = checkpoint.checkpoint(self.backbone.forward, x, timedelta(hours=6), batch.metadata.rollout_step, patch_res, use_reentrant=False)
+            x = self.backbone(
+                x,
+                lead_time=timedelta(hours=6),
+                patch_res=patch_res,
+                rollout_step=batch.metadata.rollout_step,
+            )
+            # x = checkpoint.checkpoint(self.backbone.forward, x, timedelta(hours=6), batch.metadata.rollout_step, patch_res, use_reentrant=False)
         
-        # pred = self.decoder(
-        #     x,
-        #     batch,
-        #     lead_time=timedelta(hours=6),
-        #     patch_res=patch_res,
-        # )
-        x = checkpoint.checkpoint(self.decoder.forward, x, batch, patch_res, timedelta(hours=6), use_reentrant=False)
+        x = self.decoder(
+            x,
+            batch,
+            lead_time=timedelta(hours=6),
+            patch_res=patch_res,
+        )
+        # x = checkpoint.checkpoint(self.decoder.forward, x, batch, patch_res, timedelta(hours=6), use_reentrant=False)
 
         # Remove batch and history dimension from static variables.
         x = dataclasses.replace(
