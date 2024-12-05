@@ -86,13 +86,13 @@ def same_day_eval(model, day: str, download_path: Path, device:str) -> pd.DataFr
 
     # Evaluation
     tst_batch = sameday_batch_helper(model=model, day=day, download_path=download_path, i=3)
-    tst_batch = inference_helper.preprocess_batch(model=model, batch=trn_batch, device='cpu')
+    tst_batch = inference_helper.preprocess_batch(model=model, batch=trn_batch, device='cpu', norm=False)
     surf_vars_names_wts, atmos_vars_names_wts = inference_helper.get_vars_names_wts()
     results = {var:[] for var,_,_ in surf_vars_names_wts+atmos_vars_names_wts}
 
     for i in range(2):
-        print(preds[i].surf_vars['2t'].shape)
-        print(tst_batch.surf_vars['2t'].shape)
+        # print(preds[i].surf_vars['2t'].shape)
+        # print(tst_batch.surf_vars['2t'].shape)
         for sh,lh,wt in surf_vars_names_wts:
             results[sh].append(
                 wt * np_mae(

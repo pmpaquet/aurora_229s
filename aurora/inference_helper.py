@@ -180,10 +180,11 @@ class InferenceBatcher:
             return self.features, self.labels
 
 
-def preprocess_batch(model: Aurora, batch: Batch, device:str):
+def preprocess_batch(model: Aurora, batch: Batch, device:str, norm:bool):
     p = next(model.parameters())
     batch = batch.type(p.dtype)
-    batch = batch.normalise(surf_stats=model.surf_stats)
+    if norm:
+        batch = batch.normalise(surf_stats=model.surf_stats)
     batch = batch.crop(patch_size=model.patch_size)
     batch = batch.to(device)
     return batch
