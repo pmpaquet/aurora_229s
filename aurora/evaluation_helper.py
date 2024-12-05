@@ -80,22 +80,25 @@ def same_day_eval(model, day: str, download_path: Path, device:str) -> pd.DataFr
     model = model.to("cpu")
 
     # Evaluation
+    batch = inference_helper.preprocess_batch(model=model, batch=batch, device='cpu')
     surf_vars_names_wts, atmos_vars_names_wts = inference_helper.get_vars_names_wts()
     results = {var:[] for var,_,_ in surf_vars_names_wts+atmos_vars_names_wts}
 
     for i in range(2):
+        print(preds[i].surf_vars['2t'].shape)
+        print(batch.surf_vars['2t'].shape)
         for sh,lh,wt in surf_vars_names_wts:
             results[sh].append(
                 wt * np_mae(
                     preds[i].surf_vars[sh][0, 0].numpy(),
-                    surf_vars_ds[lh][2 + i].values[::-1, :],
+                    batch.atmos_vars[sh][2 + i, 0].numpy(),
                 )
             )
         for sh,lh,wt in atmos_vars_names_wts:
             results[sh].append(
                 wt * np_mae(
                     preds[i].atmos_vars[sh][0, 0].numpy(),
-                    atmos_vars_ds[lh][2 + i].values[::-1, :],
+                    batch.atmos_vars[sh][2 + i, 0].numpy(),
                 )
             )
 
