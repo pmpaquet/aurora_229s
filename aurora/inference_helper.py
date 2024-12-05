@@ -3,6 +3,7 @@ from typing import Callable, List, Union, Tuple
 from pathlib import Path
 from datetime import timedelta
 from copy import deepcopy
+import shutil
 
 from matplotlib.style import use
 import numpy as np
@@ -14,6 +15,7 @@ from aurora import Aurora, Batch, Metadata
 from aurora.model.decoder import Perceiver3DDecoder
 from aurora.model.encoder import Perceiver3DEncoder
 from aurora.model.fourier import lead_time_expansion
+from aurora.download_data import download_for_day
 
 class InferenceBatcher:
     def __init__(self, base_date_list: List[str], data_path: Path) -> None:
@@ -52,6 +54,11 @@ class InferenceBatcher:
 
 
     def _load_date_files(self) -> None:
+        day_path = self.data_path / self.day
+
+        if not day_path.is_dir():
+            download_for_day(self.day, self.data_path)
+
         self.surf_vars_ds = xr.open_dataset(
             self.data_path / self.day / f"{self.day}-surface-level.nc",
             engine="netcdf4"
@@ -88,6 +95,7 @@ class InferenceBatcher:
         # First, check if time_index (i) is valid
         if self.time_idx > 3:
             # need to reload new date
+            shutil.rmtree(str(self.data_path / self.day))
             self._increment_day()
 
             # check whether the directory exists
