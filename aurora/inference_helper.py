@@ -2,6 +2,7 @@ import dataclasses
 from typing import Callable, List, Union, Tuple
 from pathlib import Path
 from datetime import timedelta
+from copy import deepcopy
 
 import numpy as np
 import torch
@@ -214,24 +215,32 @@ def backbone_encoder_layers_forward(model: Aurora, x: torch.Tensor, patch_res: t
     return x, skips, c, all_enc_res, padded_outs
 
 
-def backbone_decoder_layers_forward(decoder_layers, x, skips, c, num_decoder_layers, all_enc_res, padded_outs, rollout_step):
-    for i, layer in enumerate(decoder_layers):
-        index = num_decoder_layers - i - 1
-        x, _ = layer(
-            x,
-            c,
-            all_enc_res[index],
-            padded_outs[index - 1],
-            rollout_step=rollout_step,
-        )
+class BackboneDecoderLayers(torch.nn.Module):
+    def __init__(self, decoder_layers, num_decoder_layers):
+        super().__init__()
+        self.num_decoder_layers = num_decoder_layers
+        self.decoder_layers = torch.nn.ModuleList()
+        for layer in decoder_layers:
+            self.decoder_layers.append(deepcopy(layer))
 
-        if 0 < i < num_decoder_layers - 1:
-            # For the intermediate stages, we use additive skip connections.
-            x = x + skips[index - 1]
-        elif i == num_decoder_layers - 1:
-            # For the last stage, we perform concatentation like in Pangu.
-            x = torch.cat([x, skips[0]], dim=-1)
-    return x
+    def forward(self, x, skips, c, all_enc_res, padded_outs, rollout_step):
+        for i, layer in enumerate(self.decoder_layers):
+            index = self.num_decoder_layers - i - 1
+            x, _ = layer(
+                x,
+                c,
+                all_enc_res[index],
+                padded_outs[index - 1],
+                rollout_step=rollout_step,
+            )
+
+            if 0 < i < self.num_decoder_layers - 1:
+                # For the intermediate stages, we use additive skip connections.
+                x = x + skips[index - 1]
+            elif i == self.num_decoder_layers - 1:
+                # For the last stage, we perform concatentation like in Pangu.
+                x = torch.cat([x, skips[0]], dim=-1)
+        return x
 
 
 def decoder_forward(decoder: Perceiver3DDecoder, x :torch.Tensor, batch: Batch, patch_res: tuple[int, int, int], surf_stats):
