@@ -18,13 +18,15 @@ from aurora.model.fourier import lead_time_expansion
 from aurora.download_data import download_for_day
 
 class InferenceBatcher:
-    def __init__(self, base_date_list: List[str], data_path: Path) -> None:
+    def __init__(self, base_date_list: List[str], data_path: Path, max_n_days: int) -> None:
         self.base_date_list = base_date_list[:]
         self.day = self.base_date_list.pop(0)
         self.data_path = data_path
         self.static_vars_ds = xr.open_dataset(data_path / "static.nc", engine="netcdf4")
         self.surf_vars_ds: xr.Dataset
         self.atmos_vars_ds: xr.Dataset
+        self.max_n_days = max_n_days
+        self.n_days = 0
         self._load_date_files()
 
         # Variable names
@@ -90,6 +92,7 @@ class InferenceBatcher:
         assert m <= 12, f'Month is greater than 12: {m}'
 
         self.day = f'{y}-{m:02}-{d:02}'
+        self.n_days += 1
 
     def _update_internal_state(self) -> bool:
         # First, check if time_index (i) is valid
@@ -99,7 +102,7 @@ class InferenceBatcher:
             self._increment_day()
 
             # check whether the directory exists
-            if (self.data_path / self.day).is_dir():
+            if self.n_days < self.max_n_days:
                 # If next day directory exists, load from there
                 self.time_idx = 0
                 self._load_date_files()
@@ -109,6 +112,7 @@ class InferenceBatcher:
                 self._load_date_files()
                 # Need to initialize new states for features and labels
                 self._set_initial_feature_labels()
+                self.n_days = 0
             else:
                 return False
 
