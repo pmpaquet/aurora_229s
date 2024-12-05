@@ -228,14 +228,14 @@ class BackboneDecoderLayers(torch.nn.Module):
     def forward(self, x, skips, c, all_enc_res, padded_outs, rollout_step):
         for i, layer in enumerate(self.decoder_layers):
             index = self.num_decoder_layers - i - 1
-            # x, _ = layer(
-            #     x,
-            #     c,
-            #     all_enc_res[index],
-            #     padded_outs[index - 1],
-            #     rollout_step=rollout_step,
-            # )
-            x = torch.utils.checkpoint.checkpoint(layer.forward, x, c, all_enc_res[index], padded_outs[index - 1], rollout_step, use_reentrant=False)
+            x, _ = layer(
+                x,
+                c,
+                all_enc_res[index],
+                padded_outs[index - 1],
+                rollout_step=rollout_step,
+            )
+            # x = torch.utils.checkpoint.checkpoint(layer.forward, x, c, all_enc_res[index], padded_outs[index - 1], rollout_step=roll, use_reentrant=False)
 
             if 0 < i < self.num_decoder_layers - 1:
                 # For the intermediate stages, we use additive skip connections.
