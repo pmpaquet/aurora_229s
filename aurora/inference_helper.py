@@ -234,13 +234,13 @@ def backbone_encoder_layers_forward(model: Aurora, x: torch.Tensor, patch_res: t
     return x, skips, c, all_enc_res, padded_outs
 
 
-def backbone_prep(model, x, patch_res, device):
+def backbone_prep(backbone, x, patch_res, device):
     lead_time = timedelta(hours=6)
-    all_enc_res, padded_outs = model.backbone.get_encoder_specs(patch_res)
+    all_enc_res, padded_outs = backbone.get_encoder_specs(patch_res)
 
     lead_hours = lead_time / timedelta(hours=1)
     lead_times = lead_hours * torch.ones(x.shape[0], dtype=torch.float32, device=x.device)
-    c = model.backbone.time_mlp.to(device)(lead_time_expansion(lead_times, model.backbone.embed_dim).to(dtype=x.dtype))
+    c = backbone.time_mlp.to(device)(lead_time_expansion(lead_times, backbone.embed_dim).to(dtype=x.dtype))
     return c, all_enc_res, padded_outs
 
 
