@@ -17,6 +17,24 @@ from aurora.model.encoder import Perceiver3DEncoder
 from aurora.model.fourier import lead_time_expansion
 from aurora.download_data import download_for_day
 
+
+def increment_day(day:str) -> str:
+    # quick and dirty
+    days_in_month = {2:28} # 2022 not a leap year
+    for i in [9, 4, 6, 11]:
+        days_in_month[i] = 30
+    # all else is 31
+
+    y, m, d = [int(x) for x in day.split('-')]
+    d += 1
+    if d > days_in_month.get(m, 31):
+        m += 1
+        d = 1
+    assert m <= 12, f'Month is greater than 12: {m}'
+
+    return f'{y}-{m:02}-{d:02}'
+
+
 class InferenceBatcher:
     def __init__(self, base_date_list: List[str], data_path: Path, max_n_days: int) -> None:
         self.base_date_list = base_date_list[:]
@@ -77,20 +95,7 @@ class InferenceBatcher:
         self.time_idx += 1 # Finish at 2 --> this is the next index to pull from
 
     def _increment_day(self) -> None:
-        # quick and dirty
-        days_in_month = {2:28} # 2022 not a leap year
-        for i in [9, 4, 6, 11]:
-            days_in_month[i] = 30
-        # all else is 31
-
-        y, m, d = [int(x) for x in self.day.split('-')]
-        d += 1
-        if d > days_in_month.get(m, 31):
-            m += 1
-            d = 1
-        assert m <= 12, f'Month is greater than 12: {m}'
-
-        self.day = f'{y}-{m:02}-{d:02}'
+        self.day = increment_day(self.day)
         self.n_days += 1
 
     def _update_internal_state(self) -> bool:
@@ -303,3 +308,104 @@ def decoder_forward(decoder: Perceiver3DDecoder, x :torch.Tensor, batch: Batch, 
     )
 
     return x.unnormalise(surf_stats=surf_stats)
+
+
+# ------------------------------------------------------------
+# Evaluation inference helpers
+# ------------------------------------------------------------
+
+def get_vars_names_wts():
+    surf_vars_names_wts = [
+        ('2t', '2m_temperature', 3.0),
+        ('10u', '10m_u_component_of_wind', 0.77),
+        ('10v', '10m_v_component_of_wind', 0.66),
+        ('msl', 'mean_sea_level_pressure', 1.5),
+    ]
+    atmos_vars_names_wts = [
+        ('t', 'temperature', 1.7),
+        ('u', 'u_component_of_wind', 0.87),
+        ('v', 'v_component_of_wind', 0.6),
+        ('q', 'specific_humidity', 0.78),
+        ('z', 'geopotential', 2.8)
+    ]
+    return surf_vars_names_wts, atmos_vars_names_wts
+
+
+class RolloutInferenceBatcher(InferenceBatcher):
+    def __init__(self, start_day: str, data_path: Path, max_n_days: int) -> None:
+        self.day = start_day
+        self.data_path = data_path
+        # SUPER HACKY
+        self.base_date_list = [] # ALREADY NOTHING LEFT!!!
+        self.static_vars_ds = xr.open_dataset(data_path / "static.nc", engine="netcdf4")
+        self.surf_vars_ds: xr.Dataset
+        self.atmos_vars_ds: xr.Dataset
+        self.max_n_days = max_n_days
+        self.n_days = 0
+        self._load_date_files()
+
+        # Variable names
+        self.static_vars_names = [
+            ('z', 'z'),
+            ('slt', 'slt'),
+            ('lsm', 'lsm')
+        ]
+        self.surf_vars_names_wts = [
+            ('2t', '2m_temperature', 3.0),
+            ('10u', '10m_u_component_of_wind', 0.77),
+            ('10v', '10m_v_component_of_wind', 0.66),
+            ('msl', 'mean_sea_level_pressure', 1.5),
+        ]
+        self.atmos_vars_names_wts = [
+            ('t', 'temperature', 1.7),
+            ('u', 'u_component_of_wind', 0.87),
+            ('v', 'v_component_of_wind', 0.6),
+            ('q', 'specific_humidity', 0.78),
+            ('z', 'geopotential', 2.8)
+        ]
+
+        self.time_idx: int
+        self.features: Batch
+        self.labels: Batch
+        self._set_initial_feature_labels()
+        self._update_features_and_labels() # CALL IN BEGINNING
+
+
+    def rollout_update_features_and_labels(self, pred:Batch) -> None:
+        '''Updates internal state of features and labels'''
+        # sh = short-hand, lh = long-hand
+        # self.features = Batch(
+        #     surf_vars={
+        #         sh:torch.concat((self.features.surf_vars[sh][:,[-1]], self.labels.surf_vars[sh][:, [-1]]), dim=1)
+        #         for sh,_ in self.surf_vars_names
+        #     },
+        #     static_vars=self.labels.static_vars,
+        #     atmos_vars={
+        #         sh:torch.concat((self.features.atmos_vars[sh][:,[-1]], self.labels.atmos_vars[sh][:, [-1]]), dim=1)
+        #         for sh,_ in self.atmos_vars_names
+        #     },
+        #     metadata=self.labels.metadata,
+        # )
+        # Add the appropriate history so the model can be run on the prediction.
+        self.features = dataclasses.replace(
+            pred,
+            surf_vars={
+                k: torch.cat([self.features.surf_vars[k][:, 1:], v], dim=1)
+                for k, v in pred.surf_vars.items()
+            },
+            atmos_vars={
+                k: torch.cat([self.features.atmos_vars[k][:, 1:], v], dim=1)
+                for k, v in pred.atmos_vars.items()
+            },
+        )
+        self.labels = self._make_batch()
+
+    def get_batch(self):
+        is_valid_batch: bool = self._update_internal_state()
+
+        if not is_valid_batch:
+            return None, None
+        else:
+            self.time_idx += 1
+            return self.features, self.labels
+        # User needs to call rollout update function
