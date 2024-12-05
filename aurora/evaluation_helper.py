@@ -142,7 +142,7 @@ def multi_day_eval(model, day: str, download_path: Path, max_n_days:int, device:
         if verbose:
             print(batcher.day, batcher.time_idx - 1)
 
-        batch = inference_helper.preprocess_batch(model=model, batch=batch, device=device)
+        batch = inference_helper.preprocess_batch(model=model, batch=batch, device=device, norm=True)
         torch.cuda.empty_cache()
 
         p = next(model.parameters())
