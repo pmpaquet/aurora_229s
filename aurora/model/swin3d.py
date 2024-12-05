@@ -19,6 +19,7 @@ import torch.nn.functional as F
 from torch.utils import checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_3tuple
+import torch.utils.checkpoint
 
 from aurora.model.film import AdaptiveLayerNorm
 from aurora.model.fourier import lead_time_expansion
@@ -722,7 +723,8 @@ class BasicLayer3D(nn.Module):
             torch.Tensor: Output tokens.
         """
         for blk in self.blocks:
-            x = blk(x, c, res, rollout_step)
+            # x = blk(x, c, res, rollout_step)
+            x = torch.utils.checkpoint.checkpoint(blk.forward, x, c, res, rollout_step, use_reentrant=False)
         if self.downsample is not None:
             x_scaled = self.downsample(x, res)
             return x_scaled, x
