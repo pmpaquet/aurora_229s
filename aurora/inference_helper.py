@@ -247,12 +247,13 @@ class BackboneDecoderLayers(torch.nn.Module):
 
 
 def decoder_forward(decoder: Perceiver3DDecoder, x :torch.Tensor, batch: Batch, patch_res: tuple[int, int, int], surf_stats):
-    x = decoder(
-        x,
-        batch,
-        lead_time=timedelta(hours=6),
-        patch_res=patch_res,
-    )
+    # x = decoder.forward(
+    #     x,
+    #     batch,
+    #     lead_time=timedelta(hours=6),
+    #     patch_res=patch_res,
+    # )
+    x = torch.utils.checkpoint.checkpoint(decoder.forward, x, batch, patch_res, timedelta(hours=6), use_reentrant=False)
 
     x = dataclasses.replace(
         x,
