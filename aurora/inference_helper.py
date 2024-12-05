@@ -365,6 +365,21 @@ class RolloutInferenceBatcher(InferenceBatcher):
             ('z', 'geopotential', 2.8)
         ]
 
+        # HACKY
+        self.surf_vars_names = [
+            ('2t', '2m_temperature'),
+            ('10u', '10m_u_component_of_wind'),
+            ('10v', '10m_v_component_of_wind'),
+            ('msl', 'mean_sea_level_pressure'),
+        ]
+        self.atmos_vars_names = [
+            ('t', 'temperature'),
+            ('u', 'u_component_of_wind'),
+            ('v', 'v_component_of_wind'),
+            ('q', 'specific_humidity'),
+            ('z', 'geopotential')
+        ]
+
         self.time_idx: int
         self.features: Batch
         self.labels: Batch
