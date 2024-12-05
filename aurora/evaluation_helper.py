@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 
 import torch
 import numpy as np
@@ -7,6 +8,12 @@ import xarray as xr
 
 from aurora.model import aurora
 from aurora import inference_helper, Batch, download_data, Metadata, rollout
+
+
+def cleanup_download_dir(download_path: Path) -> None:
+    for item in download_path.iterdir():
+        if item.stem.startswith('2022-'):
+            shutil.rmtree(str(item))
 
 
 def np_mae(x: np.ndarray, y: np.ndarray):
@@ -114,6 +121,9 @@ def same_day_eval(model, day: str, download_path: Path, device:str) -> pd.DataFr
     results_df["multitask"] = np.sum(results_df.values, axis=1)
     results_df["Day"] = [day, day]
     results_df["Time"] = ['12:00:00', '18:00:00']
+
+    cleanup_download_dir(download_path=download_path)
+
     return results_df
 
 
@@ -171,7 +181,10 @@ def multi_day_eval(model, day: str, download_path: Path, max_n_days:int, device:
 
         # UPDATE BATCHER
         batcher.rollout_update_features_and_labels(preds)
+        cleanup_download_dir(download_path=download_path)
+
 
     results_df = pd.DataFrame(results)
     results_df['multitask'] = np.sum(results_df[[c for c in results_df.columns if not c in ['Day', 'TimeIndex']]].values, axis=1)
+    cleanup_download_dir(download_path=download_path)
     return results_df
