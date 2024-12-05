@@ -88,3 +88,18 @@ def compression_loop(original_model, ratio:float, compress_func: Callable, grad_
         )
 
     return model
+
+def svd_only_compression(original_model, ratio:float):
+    return compression_loop(
+        original_model=original_model, ratio=ratio, compress_func=svd_param, grad_path=Path('.')
+    )
+
+def fisher_base_compression(original_model, ratio:float, grad_path:Path):
+    return compression_loop(
+        original_model=original_model, ratio=ratio, compress_func=fisher_param, grad_path=grad_path
+    )
+
+def fisher_improved_compression(original_model, ratio:float, grad_path:Path):
+    return compression_loop(
+        original_model=original_model, ratio=ratio, compress_func=improved_fisher_param, grad_path=grad_path
+    )
