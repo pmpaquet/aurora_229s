@@ -56,9 +56,8 @@ class InferenceBatcher:
 
 
     def _load_date_files(self) -> None:
-        day_path = self.data_path / self.day
 
-        if not day_path.is_dir():
+        if not (self.data_path / self.day / f"{self.day}-atmospheric.nc").is_file():
             download_for_day(self.day, self.data_path)
 
         self.surf_vars_ds = xr.open_dataset(
