@@ -244,9 +244,12 @@ def multi_day_eval_v2(model, day: str, download_path: Path, max_n_days:int, devi
 
             # UPDATE BATCHER
             _, labels = batcher.get_batch()
-            cleanup_download_dir(download_path=download_path)
+            try:
+                cleanup_download_dir(download_path=download_path)
+            except:
+                pass
 
     results_df = pd.DataFrame(results)
     results_df['multitask'] = np.sum(results_df[[c for c in results_df.columns if not c in ['Day', 'TimeIndex']]].values, axis=1)
-    cleanup_download_dir(download_path=download_path)
+    # cleanup_download_dir(download_path=download_path)
     return results_df
