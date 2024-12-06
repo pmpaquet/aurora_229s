@@ -164,25 +164,32 @@ def multi_day_eval(model, day: str, download_path: Path, max_n_days:int, device:
         torch.cuda.empty_cache()
 
         # Append loss
+        is_loss_nan = False
         for sh,_,wt in surf_vars_names_wts:
-            results[sh].append(
-                wt * np_mae(
-                    preds.surf_vars[sh][0, 0].numpy(),
-                    labels.surf_vars[sh][0, 0].numpy(),
-                )
+            loss = wt * np_mae(
+                preds.surf_vars[sh][0, 0].numpy(),
+                labels.surf_vars[sh][0, 0].numpy(),
             )
+            is_loss_nan = is_loss_nan or bool(np.isnan(loss))
+            results[sh].append(loss)
         for sh,_,wt in atmos_vars_names_wts:
-            results[sh].append(
-                wt * np_mae(
-                    preds.atmos_vars[sh][0, 0].numpy(),
-                    labels.atmos_vars[sh][0, 0].numpy(),
-                )
+            loss = wt * np_mae(
+                preds.atmos_vars[sh][0, 0].numpy(),
+                labels.atmos_vars[sh][0, 0].numpy(),
             )
+            is_loss_nan = is_loss_nan or bool(np.isnan(loss))
+            results[sh].append(loss)
+
+        # Fix if isnan
+        if is_loss_nan:
+            for sh,_,_ in surf_vars_names_wts:
+                preds.surf_vars[sh] = torch.where(torch.isnan(preds.surf_vars[sh]), preds.surf_vars[sh], labels.surf_vars[sh])
+            for sh,_,_ in atmos_vars_names_wts:
+                preds.atmos_vars[sh] = torch.where(torch.isnan(preds.atmos_vars[sh]), preds.atmos_vars[sh], labels.atmos_vars[sh])
 
         # UPDATE BATCHER
         batcher.rollout_update_features_and_labels(preds)
         cleanup_download_dir(download_path=download_path)
-
 
     results_df = pd.DataFrame(results)
     results_df['multitask'] = np.sum(results_df[[c for c in results_df.columns if not c in ['Day', 'TimeIndex']]].values, axis=1)
