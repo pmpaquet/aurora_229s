@@ -13,7 +13,7 @@ def is_name_compressible(name:str):
 
 def reset_param(current_param, new_param):
     # SUPER HACKY BUT IT WORKS
-    current_param += new_param - current_param
+    current_param += new_param.to(current_param.dtype) - current_param
 
 def svd_param(param:torch.Tensor, ratio:float, name:str, grad_path:Path):
     # arguments not most pythonic but okay for now
