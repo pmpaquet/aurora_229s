@@ -407,12 +407,12 @@ class RolloutInferenceBatcher(InferenceBatcher):
             pred,
             surf_vars={
                 # k: torch.cat([self.features.surf_vars[k][:, 1:], v], dim=1)
-                k: torch.cat([self.features.surf_vars[k][:, :], v], dim=1)
+                k: torch.cat([self.features.surf_vars[k][:, 1:], v], dim=1)
                 for k, v in pred.surf_vars.items()
             },
             atmos_vars={
                 # k: torch.cat([self.features.atmos_vars[k][:, 1:], v], dim=1)
-                k: torch.cat([self.features.atmos_vars[k][:, :], v], dim=1)
+                k: torch.cat([self.features.atmos_vars[k][:, 1:], v], dim=1)
                 for k, v in pred.atmos_vars.items()
             },
         )
