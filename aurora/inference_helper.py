@@ -384,41 +384,10 @@ class RolloutInferenceBatcher(InferenceBatcher):
         self.features: Batch
         self.labels: Batch
         self._set_initial_feature_labels()
-        self._update_features_and_labels() # CALL IN BEGINNING
+        # self._update_features_and_labels() # CALL IN BEGINNING
 
-
-    def rollout_update_features_and_labels(self, pred:Batch) -> None:
+    def rollout_new_labels(self) -> None:
         '''Updates internal state of features and labels'''
-        # sh = short-hand, lh = long-hand
-        # self.features = Batch(
-        #     surf_vars={
-        #         sh:torch.concat((self.features.surf_vars[sh][:,[-1]], self.labels.surf_vars[sh][:, [-1]]), dim=1)
-        #         for sh,_ in self.surf_vars_names
-        #     },
-        #     static_vars=self.labels.static_vars,
-        #     atmos_vars={
-        #         sh:torch.concat((self.features.atmos_vars[sh][:,[-1]], self.labels.atmos_vars[sh][:, [-1]]), dim=1)
-        #         for sh,_ in self.atmos_vars_names
-        #     },
-        #     metadata=self.labels.metadata,
-        # )
-        # Add the appropriate history so the model can be run on the prediction.
-        # for k,v in pred.surf_vars.items():
-        #     print(k, v.shape, self.features.surf_vars[k].shape)
-        # print(pred.shape)
-        self.features = dataclasses.replace(
-            pred,
-            surf_vars={
-                # k: torch.cat([self.features.surf_vars[k][:, 1:], v], dim=1)
-                k: torch.cat([self.features.surf_vars[k][:, :, 1:], v], dim=1)
-                for k, v in pred.surf_vars.items()
-            },
-            atmos_vars={
-                # k: torch.cat([self.features.atmos_vars[k][:, 1:], v], dim=1)
-                k: torch.cat([self.features.atmos_vars[k][:, :, 1:], v], dim=1)
-                for k, v in pred.atmos_vars.items()
-            },
-        )
         self.labels = self._make_batch()
 
     def get_batch(self):
@@ -427,6 +396,7 @@ class RolloutInferenceBatcher(InferenceBatcher):
         if not is_valid_batch:
             return None, None
         else:
+            self.rollout_new_labels()
             self.time_idx += 1
             return self.features, self.labels
         # User needs to call rollout update function
