@@ -24,17 +24,9 @@ def svd_param(param:torch.Tensor, ratio:float, name:str, grad_path:Path):
 
 
 def _find_wt_path(name:str, grad_path: Path) -> Path:
-    # Encoder or decoder
-    if name.startswith('backbone.encoder_layers'):
-        wt_path = grad_path / 'backbone_encoder'
-    elif name.startswith('backbone.decoder_layers'):
-        wt_path = grad_path / 'backbone_decoder'
-    else:
-        assert False, name
-
     name_parts = name.split('.')
     wt_name =  '.'.join(name_parts[1:3] + ['_checkpoint_wrapped_module'] + name_parts[3:] + ['pt'])
-    return wt_path / wt_name
+    return grad_path / wt_name
     
 
 def fisher_param(param:torch.Tensor, ratio:float, name:str, grad_path: Path):
