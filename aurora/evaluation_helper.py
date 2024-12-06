@@ -93,7 +93,7 @@ def same_day_eval(model, day: str, download_path: Path, device:str) -> pd.DataFr
 
     # Evaluation
     tst_batch = sameday_batch_helper(model=model, day=day, download_path=download_path, i=3)
-    tst_batch = inference_helper.preprocess_batch(model=model, batch=trn_batch, device='cpu', norm=False)
+    tst_batch = inference_helper.preprocess_batch(model=model, batch=tst_batch, device='cpu', norm=False)
     surf_vars_names_wts, atmos_vars_names_wts = inference_helper.get_vars_names_wts()
     results = {var:[] for var,_,_ in surf_vars_names_wts+atmos_vars_names_wts}
 
@@ -190,6 +190,61 @@ def multi_day_eval(model, day: str, download_path: Path, max_n_days:int, device:
         # UPDATE BATCHER
         batcher.rollout_update_features_and_labels(preds)
         cleanup_download_dir(download_path=download_path)
+
+    results_df = pd.DataFrame(results)
+    results_df['multitask'] = np.sum(results_df[[c for c in results_df.columns if not c in ['Day', 'TimeIndex']]].values, axis=1)
+    cleanup_download_dir(download_path=download_path)
+    return results_df
+
+def multi_day_eval_v2(model, day: str, download_path: Path, max_n_days:int, device:str, verbose:bool) -> pd.DataFrame:
+
+    batcher = inference_helper.RolloutInferenceBatcher(start_day=day, data_path=download_path, max_n_days=max_n_days)
+    
+    model.eval()
+    model = model.to(device)
+    
+    surf_vars_names_wts, atmos_vars_names_wts = inference_helper.get_vars_names_wts()
+    results = {var:[] for var,_,_ in surf_vars_names_wts+atmos_vars_names_wts}
+    results['TimeIndex'] = []
+    results['Day'] = []
+
+    batch, labels = batcher.get_batch()
+    n_steps = (max_n_days * 4) - 2
+    with torch.inference_mode():
+        for preds in rollout(model, batch, steps=n_steps):
+
+            labels = inference_helper.preprocess_batch(model=model, batch=labels, device='cpu', norm=False)
+            
+            results['Day'].append(batcher.day)
+            results['TimeIndex'].append(batcher.time_idx)
+
+            # Append loss
+            is_loss_nan = False
+            for sh,_,wt in surf_vars_names_wts:
+                loss = wt * np_mae(
+                    preds.surf_vars[sh][0, 0].numpy(),
+                    labels.surf_vars[sh][0, 0].numpy(),
+                )
+                is_loss_nan = is_loss_nan or bool(np.isnan(loss))
+                results[sh].append(loss)
+            for sh,_,wt in atmos_vars_names_wts:
+                loss = wt * np_mae(
+                    preds.atmos_vars[sh][0, 0].numpy(),
+                    labels.atmos_vars[sh][0, 0].numpy(),
+                )
+                is_loss_nan = is_loss_nan or bool(np.isnan(loss))
+                results[sh].append(loss)
+
+            # Fix if isnan
+            if is_loss_nan:
+                for sh,_,_ in surf_vars_names_wts:
+                    preds.surf_vars[sh] = torch.where(torch.isnan(preds.surf_vars[sh]), preds.surf_vars[sh], labels.surf_vars[sh])
+                for sh,_,_ in atmos_vars_names_wts:
+                    preds.atmos_vars[sh] = torch.where(torch.isnan(preds.atmos_vars[sh]), preds.atmos_vars[sh], labels.atmos_vars[sh])
+
+            # UPDATE BATCHER
+            _, labels = batcher.get_batch()
+            cleanup_download_dir(download_path=download_path)
 
     results_df = pd.DataFrame(results)
     results_df['multitask'] = np.sum(results_df[[c for c in results_df.columns if not c in ['Day', 'TimeIndex']]].values, axis=1)
