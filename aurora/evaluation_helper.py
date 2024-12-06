@@ -212,7 +212,7 @@ def multi_day_eval_v2(model, day: str, download_path: Path, max_n_days:int, devi
     n_steps = (max_n_days * 4) - 2
     with torch.inference_mode():
         for preds in rollout(model, batch, steps=n_steps):
-
+            preds = preds.to('cpu')
             labels = inference_helper.preprocess_batch(model=model, batch=labels, device='cpu', norm=False)
             
             results['Day'].append(batcher.day)
